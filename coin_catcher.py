@@ -52,7 +52,7 @@ score = 0
 life = 3
 
 #//// 測試       level = 1
-level = 3
+level = 1
 max_level = 3
 
 falling_objects = []
