@@ -50,6 +50,8 @@ player_speed = 8
 # =========================
 score = 0
 life = 3
+
+#//// 測試       level = 1
 level = 1
 max_level = 3
 
@@ -63,7 +65,22 @@ transition_timer = 0
 transition_text = ""
 
 # 第三關拼字
-target_word = "GAME"
+word_list = [
+    "GAME",
+    "COIN",
+    "STAR",
+    "CODE",
+    "PLAY",
+    "GOLD",
+    "HERO",
+    "MOON",
+    "FIRE",
+    "WIND"
+]
+word_goal = 5
+target_words = random.sample(word_list, word_goal)
+word_number = 0
+target_word = target_words[word_number]
 current_index = 0
 collected_word = ""
 
@@ -122,7 +139,8 @@ def create_falling_object():
         if random.random() < 0.5:
             letter = correct_letter
         else:
-            letter = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            wrong_letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".replace(correct_letter, "")
+            letter = random.choice(wrong_letters)
 
         obj = {
             "x": x,
@@ -231,12 +249,19 @@ def update_falling_objects():
 
         # 接到物件
         if player_rect.colliderect(obj_rect):
+            word_finished = False
+
             if level == 3:
-                handle_letter_catch(obj)
+                word_finished = handle_letter_catch(obj)
             else:
                 handle_normal_catch(obj)
 
-            falling_objects.remove(obj)
+            if obj in falling_objects:
+                falling_objects.remove(obj)
+
+            if word_finished:
+                falling_objects.clear()
+                break
 
         # 物件掉出畫面
         elif obj["y"] > HEIGHT:
@@ -265,6 +290,15 @@ def handle_normal_catch(obj):
 # =========================
 # 第三關接到字母
 # =========================
+def start_next_word():
+    global word_number, target_word, current_index, collected_word
+
+    word_number += 1
+    target_word = target_words[word_number]
+    current_index = 0
+    collected_word = ""
+
+
 def handle_letter_catch(obj):
     global score, life, current_index, collected_word, game_state
 
@@ -276,10 +310,18 @@ def handle_letter_catch(obj):
         score += 2
 
         if current_index >= len(target_word):
-            game_state = "clear"
+            if word_number + 1 >= word_goal:
+                game_state = "clear"
+            else:
+                start_next_word()
+
+            return True
 
     else:
+        # 接到不是目前需要的字母會扣血
         life -= 1
+
+    return False
 
 
 # =========================
@@ -321,7 +363,7 @@ def check_level_progress():
 # =========================
 def draw_ui():
     if level == 3:
-        ui = f"Score: {score}   Life: {life}   Level: {level}   Word: {target_word}   Current: {collected_word}"
+        ui = f"Score: {score}   Life: {life}   Level: {level}   Word: {word_number + 1}/{word_goal} {target_word}   Current: {collected_word}"
     else:
         setting = get_level_setting(level)
         ui = f"Score: {score}   Life: {life}   Level: {level}   Target: {setting['target_score']}"
@@ -363,12 +405,14 @@ def draw_clear():
     screen.fill(BLACK)
 
     text = big_font.render("YOU WIN!", True, GOLD)
-    word_text = font.render(f"Completed Word: {target_word}", True, WHITE)
+    word_text = font.render(f"Completed Words: {word_goal}", True, WHITE)
+    words_text = font.render("Words: " + " / ".join(target_words), True, WHITE)
     score_text = font.render(f"Final Score: {score}", True, WHITE)
 
     screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 100))
     screen.blit(word_text, (WIDTH // 2 - word_text.get_width() // 2, HEIGHT // 2 - 20))
-    screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 + 25))
+    screen.blit(words_text, (WIDTH // 2 - words_text.get_width() // 2, HEIGHT // 2 + 25))
+    screen.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 + 70))
 
 
 # =========================
