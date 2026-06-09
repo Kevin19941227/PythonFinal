@@ -1,6 +1,7 @@
 import pygame
 import random
 import sys
+import math
 
 # =========================
 # 初始化
@@ -107,6 +108,13 @@ button_click_sound = pygame.mixer.Sound(
 )
 
 button_click_sound.set_volume(0.6)
+
+
+def play_sound(sound):
+    if sound_on:
+        sound.play()
+
+
 # =========================
 # 玩家設定
 # =========================
@@ -115,6 +123,11 @@ player_height = 25
 player_x = WIDTH // 2 - player_width // 2
 player_y = HEIGHT - 70
 player_speed = 8
+player_draw_height = 55
+level_two_rotation_angle = 0
+level_two_rotation_speed = 4
+spawn_edge_padding = 70
+edge_spawn_chance = 0.18
 
 # =========================
 # 遊戲資料
@@ -188,6 +201,84 @@ def get_level_setting(level):
         }
 
 
+def is_level_two_cheat_mode():
+    return spin_cheat_enabled and level == 2
+
+
+def rotate_point_around_center(x, y, angle):
+    radians = math.radians(angle)
+    center_x = WIDTH / 2
+    center_y = HEIGHT / 2
+    dx = x - center_x
+    dy = y - center_y
+
+    return (
+        center_x + dx * math.cos(radians) - dy * math.sin(radians),
+        center_y + dx * math.sin(radians) + dy * math.cos(radians)
+    )
+
+
+def get_object_draw_position(obj):
+    x = obj["x"]
+    y = obj["y"]
+    size = obj["size"]
+
+    if not is_level_two_cheat_mode() or "vx" not in obj or "vy" not in obj:
+        return int(x), int(y)
+
+    center_x = x + size / 2
+    center_y = y + size / 2
+    rotated_x, rotated_y = rotate_point_around_center(
+        center_x,
+        center_y,
+        level_two_rotation_angle
+    )
+
+    return int(rotated_x - size / 2), int(rotated_y - size / 2)
+
+
+def get_player_rect():
+    if not is_level_two_cheat_mode():
+        return pygame.Rect(
+            player_x,
+            player_y - (player_draw_height - player_height),
+            player_width,
+            player_draw_height
+        )
+
+    return pygame.Rect(
+        WIDTH // 2 - player_width // 2,
+        HEIGHT - player_draw_height,
+        player_width,
+        player_draw_height
+    )
+
+
+def update_player(keys):
+    global player_x, level_two_rotation_angle
+
+    if is_level_two_cheat_mode():
+        if keys[pygame.K_LEFT]:
+            level_two_rotation_angle -= level_two_rotation_speed
+
+        if keys[pygame.K_RIGHT]:
+            level_two_rotation_angle += level_two_rotation_speed
+
+        return
+
+    if keys[pygame.K_LEFT]:
+        player_x -= player_speed
+
+    if keys[pygame.K_RIGHT]:
+        player_x += player_speed
+
+    if player_x < 0:
+        player_x = 0
+
+    if player_x + player_width > WIDTH:
+        player_x = WIDTH - player_width
+
+
 # =========================
 # 產生掉落物
 # =========================
@@ -197,7 +288,38 @@ def create_falling_object():
     setting = get_level_setting(level)
     size = setting["coin_size"]
 
-    x = random.randint(0, WIDTH - size)
+    if level == 2 and spin_cheat_enabled:
+        x = WIDTH // 2 - size // 2
+        y = HEIGHT // 2 - size // 2
+
+        if random.random() < setting["bad_rate"]:
+            obj_type = random.choice(["rock", "fake_coin"])
+        else:
+            obj_type = "coin"
+
+        angle = random.uniform(0, math.tau)
+        speed = setting["fall_speed"] - 1
+        falling_objects.append({
+            "x": x,
+            "y": y,
+            "size": size,
+            "speed": speed,
+            "vx": math.cos(angle) * speed,
+            "vy": math.sin(angle) * speed,
+            "type": obj_type
+        })
+        return
+
+    if random.random() < edge_spawn_chance:
+        x = random.choice([
+            random.randint(0, spawn_edge_padding),
+            random.randint(WIDTH - size - spawn_edge_padding, WIDTH - size)
+        ])
+    else:
+        min_x = spawn_edge_padding
+        max_x = WIDTH - size - spawn_edge_padding
+        x = random.randint(min_x, max_x)
+
     y = -size
 
     # 第三關：拼字模式
@@ -244,11 +366,19 @@ def create_falling_object():
 # 畫玩家
 # =========================
 def draw_player():
+    if is_level_two_cheat_mode():
+        basket_scaled = pygame.transform.scale(
+            basket_img,
+            (player_width, player_draw_height)
+        )
+        screen.blit(basket_scaled, get_player_rect())
+        return
+
     basket_scaled = pygame.transform.scale(
         basket_img,
-        (player_width, 55)
+        (player_width, player_draw_height)
     )
-    screen.blit(basket_scaled, (player_x, player_y - 25))
+    screen.blit(basket_scaled, (player_x, player_y - (player_draw_height - player_height)))
 
     # # 籃子上緣
     # pygame.draw.rect(
@@ -263,8 +393,7 @@ def draw_player():
 # =========================
 def draw_falling_objects():
     for obj in falling_objects:
-        x = obj["x"]
-        y = obj["y"]
+        x, y = get_object_draw_position(obj)
         size = obj["size"]
 
         if obj["type"] == "coin":
@@ -292,12 +421,17 @@ def draw_falling_objects():
 def update_falling_objects():
     global score, life, current_index, collected_word, game_state
 
-    player_rect = pygame.Rect(player_x, player_y, player_width, player_height)
+    player_rect = get_player_rect()
 
     for obj in falling_objects[:]:
-        obj["y"] += obj["speed"]
+        if "vx" in obj and "vy" in obj:
+            obj["x"] += obj["vx"]
+            obj["y"] += obj["vy"]
+        else:
+            obj["y"] += obj["speed"]
 
-        obj_rect = pygame.Rect(obj["x"], obj["y"], obj["size"], obj["size"])
+        obj_x, obj_y = get_object_draw_position(obj)
+        obj_rect = pygame.Rect(obj_x, obj_y, obj["size"], obj["size"])
 
         # 接到物件
         if player_rect.colliderect(obj_rect):
@@ -316,7 +450,12 @@ def update_falling_objects():
                 break
 
         # 物件掉出畫面
-        elif obj["y"] > HEIGHT:
+        elif (
+            obj["y"] > HEIGHT or
+            obj["y"] + obj["size"] < 0 or
+            obj["x"] > WIDTH or
+            obj["x"] + obj["size"] < 0
+        ):
             handle_miss(obj)
             falling_objects.remove(obj)
 
@@ -329,15 +468,15 @@ def handle_normal_catch(obj):
 
     if obj["type"] == "coin":
         score += 1
-        coin_sound.play()
+        play_sound(coin_sound)
 
     elif obj["type"] == "rock":
         life -= 1
-        rock_sound.play()
+        play_sound(rock_sound)
 
     elif obj["type"] == "fake_coin":
         score -= 1
-        fake_coin_sound.play()
+        play_sound(fake_coin_sound)
 
         if score < 0:
             score = 0
@@ -361,7 +500,7 @@ def handle_letter_catch(obj):
     correct_letter = target_word[current_index]
 
     if obj["letter"] == correct_letter:
-        letter_correct_sound.play()
+        play_sound(letter_correct_sound)
         collected_word += obj["letter"]
         current_index += 1
         score += 2
@@ -369,7 +508,7 @@ def handle_letter_catch(obj):
         if current_index >= len(target_word):
             if word_number + 1 >= word_goal:
                 pygame.mixer.music.stop()
-                win_sound.play()
+                play_sound(win_sound)
                 game_state = "clear"
             else:
                 start_next_word()
@@ -377,7 +516,7 @@ def handle_letter_catch(obj):
             return True
 
     else:
-        letter_wrong_sound.play()
+        play_sound(letter_wrong_sound)
         # 接到不是目前需要的字母會扣血
         life -= 1
 
@@ -411,7 +550,7 @@ def check_level_progress():
 
     if level in [1, 2] and score >= setting["target_score"]:
         level += 1
-        level_up_sound.play()
+        play_sound(level_up_sound)
         falling_objects.clear()
 
         game_state = "transition"
@@ -603,7 +742,7 @@ def restart_game():
     global falling_objects
     global word_number, current_index
     global collected_word, target_words, target_word
-    global player_x
+    global player_x, level_two_rotation_angle
     global game_over_played
     game_over_played = False
 
@@ -612,6 +751,7 @@ def restart_game():
     level = 1
 
     player_x = WIDTH // 2 - player_width // 2
+    level_two_rotation_angle = 0
 
     spawn_timer = 0
     falling_objects.clear()
@@ -783,6 +923,51 @@ def draw_clear():
 # =========================\
 game_over_played = False
 running = True
+spin_cheat_enabled = False
+spin_cheat_angle = 0
+spin_cheat_speed = 0.8
+spin_cheat_background_scale = 1.45
+spin_cheat_screen_scale = 0.85
+
+
+def handle_spin_cheat(event):
+    global spin_cheat_enabled, spin_cheat_angle
+
+    if event.type != pygame.KEYDOWN:
+        return
+
+    keys = pygame.key.get_pressed()
+    ctrl_pressed = keys[pygame.K_LCTRL] or keys[pygame.K_RCTRL]
+
+    if ctrl_pressed and keys[pygame.K_p] and keys[pygame.K_y]:
+        spin_cheat_enabled = not spin_cheat_enabled
+        spin_cheat_angle = 0
+
+
+def apply_spin_cheat():
+    global spin_cheat_angle
+
+    if not spin_cheat_enabled:
+        return
+
+    spin_cheat_angle = (spin_cheat_angle + spin_cheat_speed) % 360
+    current_frame = screen.copy()
+    background_frame = pygame.transform.rotozoom(
+        current_frame,
+        spin_cheat_angle,
+        spin_cheat_background_scale
+    )
+    foreground_frame = pygame.transform.rotozoom(
+        current_frame,
+        spin_cheat_angle,
+        spin_cheat_screen_scale
+    )
+    background_rect = background_frame.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    foreground_rect = foreground_frame.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+
+    screen.fill(BLACK)
+    screen.blit(background_frame, background_rect)
+    screen.blit(foreground_frame, foreground_rect)
 
 while running:
     clock.tick(FPS)
@@ -794,24 +979,14 @@ while running:
         pygame.mixer.music.stop()
         game_state = "game_over"
         if not game_over_played:
-           game_over_sound.play()
+           play_sound(game_over_sound)
            game_over_played = True
 
       # 畫面更新
     if game_state == "playing":
         keys = pygame.key.get_pressed()
 
-        if keys[pygame.K_LEFT]:
-            player_x -= player_speed
-
-        if keys[pygame.K_RIGHT]:
-            player_x += player_speed
-
-        if player_x < 0:
-            player_x = 0
-
-        if player_x + player_width > WIDTH:
-            player_x = WIDTH - player_width
+        update_player(keys)
 
         spawn_timer += 1
         setting = get_level_setting(level)
@@ -843,12 +1018,17 @@ while running:
 
     # 事件處理
     for event in pygame.event.get():
+        handle_spin_cheat(event)
+
         if event.type == pygame.QUIT:
             running = False
 
         for button in buttons:
              if button.check_click(event):
               break
+
+    if game_state == "playing" and not is_level_two_cheat_mode():
+        apply_spin_cheat()
 
     pygame.display.update()
 
